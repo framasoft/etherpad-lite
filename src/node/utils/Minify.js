@@ -34,6 +34,7 @@ const log4js = require('log4js');
 const logger = log4js.getLogger('Minify');
 
 const ROOT_DIR = path.join(settings.root, 'src/static/');
+//const COMPRESSED_DIR = path.join(settings.root, 'compressed/src/static/');
 
 const threadsPool = new Threads.Pool(() => Threads.spawn(new Threads.Worker('./MinifyWorker')), 2);
 
@@ -285,51 +286,88 @@ const _requireLastModified = new Date();
 const requireDefinition = () => `var require = ${RequireKernel.kernelSource};\n`;
 
 const getFileCompressed = async (filename, contentType) => {
-  let content = await getFile(filename);
-  if (!content || !settings.minify) {
-    return content;
-  } else if (contentType === 'application/javascript') {
-    return await new Promise((resolve) => {
-      threadsPool.queue(async ({compressJS}) => {
-        try {
-          logger.info('Compress JS file %s.', filename);
-
-          content = content.toString();
-          const compressResult = await compressJS(content);
-
-          if (compressResult.error) {
-            console.error(`Error compressing JS (${filename}) using terser`, compressResult.error);
-          } else {
-            content = compressResult.code.toString(); // Convert content obj code to string
-          }
-        } catch (error) {
-          console.error('getFile() returned an error in ' +
-                        `getFileCompressed(${filename}, ${contentType}): ${error}`);
-        }
-        resolve(content);
-      });
-    });
-  } else if (contentType === 'text/css') {
-    return await new Promise((resolve) => {
-      threadsPool.queue(async ({compressCSS}) => {
-        try {
-          logger.info('Compress CSS file %s.', filename);
-
-          content = await compressCSS(filename, ROOT_DIR);
-        } catch (error) {
-          console.error(`CleanCSS.minify() returned an error on ${filename}: ${error}`);
-        }
-        resolve(content);
-      });
-    });
-  } else {
-    return content;
+  let tempFilename = filename
+  if (path.isAbsolute(tempFilename)) {
+    tempFilename = tempFilename.replace(''+settings.root, path.join(settings.root, '.compressed'));
   }
+  let compressedFilename = path.resolve(path.join(settings.root, '.compressed/src/static/'), tempFilename),
+      compressedContent;
+  try {
+    compressedContent = await getPreparedFile(filename);
+    if (contentType === 'application/javascript' || contentType === 'text/css') {
+      logger.debug('Using compressed file %s for %s.', compressedFilename, filename);
+    }
+  } catch (error) {
+    if (contentType === 'application/javascript' || contentType === 'text/css') {
+      logger.info('No already compressed file for %s.', filename);
+    }
+    let content = await getFile(filename);
+    if (!content || !settings.minify) {
+      return content;
+    } else if (contentType === 'application/javascript') {
+      return await new Promise((resolve) => {
+        threadsPool.queue(async ({compressJS}) => {
+          try {
+            logger.info('Compress JS file %s.', filename);
+
+            content = content.toString();
+            const compressResult = await compressJS(content);
+
+            if (compressResult.error) {
+              console.error(`Error compressing JS (${filename}) using terser`, compressResult.error);
+            } else {
+              content = compressResult.code.toString(); // Convert content obj code to string
+              try {
+                await fs.mkdir(path.dirname(compressedFilename), { recursive: true });
+                await fs.writeFile(compressedFilename, content);
+              } catch (error) {
+                logger.info('Can\'t write compressed JS file %s.', compressedFilename);
+              }
+            }
+          } catch (error) {
+            console.error('getFile() returned an error in ' +
+                          `getFileCompressed(${filename}, ${contentType}): ${error}`);
+          }
+          resolve(content);
+        });
+      });
+    } else if (contentType === 'text/css') {
+      return await new Promise((resolve) => {
+        threadsPool.queue(async ({compressCSS}) => {
+          try {
+            logger.info('Compress CSS file %s.', filename);
+
+            content = await compressCSS(filename, ROOT_DIR);
+            try {
+              await fs.mkdir(path.dirname(compressedFilename), { recursive: true });
+              await fs.writeFile(compressedFilename, content);
+            } catch (error) {
+              logger.info('Can\'t write compressed CSS file %s.', compressedFilename);
+            }
+          } catch (error) {
+            console.error(`CleanCSS.minify() returned an error on ${filename}: ${error}`);
+          }
+          resolve(content);
+        });
+      });
+    } else {
+      return content;
+    }
+  }
+  return compressedContent;
 };
 
 const getFile = async (filename) => {
   if (filename === 'js/require-kernel.js') return requireDefinition();
   return await fs.readFile(path.resolve(ROOT_DIR, filename));
+};
+
+const getPreparedFile = async (filename) => {
+  if (filename === 'js/require-kernel.js') return requireDefinition();
+  if (path.isAbsolute(filename)) {
+    filename = filename.replace(''+settings.root, path.join(settings.root, '.compressed'));
+  }
+  return await fs.readFile(path.resolve(path.join(settings.root, '.compressed/src/static/'), filename));
 };
 
 exports.minify = (req, res, next) => minify(req, res).catch((err) => next(err || new Error(err)));

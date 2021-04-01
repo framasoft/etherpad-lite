@@ -47,6 +47,8 @@ const pluginDefs = require('../static/js/pluginfw/plugin_defs');
 const plugins = require('../static/js/pluginfw/plugins');
 const settings = require('./utils/Settings');
 const stats = require('./stats');
+const path = require('path');
+const fs = require('fs').promises;
 
 const logger = log4js.getLogger('server');
 
@@ -145,6 +147,7 @@ exports.start = async () => {
     logger.debug(`Installed parts:\n${plugins.formatParts()}`);
     logger.debug(`Installed server-side hooks:\n${plugins.formatHooks('hooks', false)}`);
     await hooks.aCallAll('loadSettings', {settings});
+    await fs.rmdir(path.join(settings.root, '.compressed'), { recursive: true });
     await hooks.aCallAll('createServer');
   } catch (err) {
     logger.error('Error occurred while starting Etherpad');

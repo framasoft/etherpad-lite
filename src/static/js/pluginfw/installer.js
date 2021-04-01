@@ -6,12 +6,15 @@ const hooks = require('./hooks');
 const request = require('request');
 const runCmd = require('../../../node/utils/run_cmd');
 const settings = require('../../../node/utils/Settings');
+const path = require('path');
+const fs = require('fs').promises;
 
 const logger = log4js.getLogger('plugins');
 
 const onAllTasksFinished = async () => {
   settings.reloadSettings();
   await hooks.aCallAll('loadSettings', {settings});
+  await fs.rmdir(path.join(settings.root, '.compressed'), { recursive: true });
   await hooks.aCallAll('restartServer');
 };
 

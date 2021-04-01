@@ -5,6 +5,7 @@ const fs = require('fs');
 const hooks = require('../../../static/js/pluginfw/hooks');
 const plugins = require('../../../static/js/pluginfw/plugins');
 const settings = require('../../utils/Settings');
+const path = require('path');
 
 exports.expressCreateServer = (hookName, args, cb) => {
   args.app.get('/admin/settings', (req, res) => {
@@ -48,6 +49,7 @@ exports.socketio = (hookName, args, cb) => {
     socket.on('restartServer', async () => {
       console.log('Admin request to restart server through a socket on /admin/settings');
       settings.reloadSettings();
+      await fs.promises.rmdir(path.join(settings.root, '.compressed'), { recursive: true });
       await plugins.update();
       await hooks.aCallAll('loadSettings', {settings});
       await hooks.aCallAll('restartServer');
